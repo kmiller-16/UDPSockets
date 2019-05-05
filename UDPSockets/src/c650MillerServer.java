@@ -2,48 +2,80 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 
+
 public class c650MillerServer {
 
+    // initial timeout value in milliseconds, set by user
     private int mTimeout;
+    // bytes per packet, set by user
     private int mBytesPerPacket = 0;
+    // server class
     private static c650MillerServer mServer;
+    // test file location per the spec sheet
     private File mTestFile = new File("C:\\c650projs19\\stestfile");
+    // test file size in bytes
     private long mFileSize = mTestFile.length();
-    ArrayList<byte[]> mListofPackets;
+    // all packets to be sent
+    private ArrayList<byte[]> mListofPackets;
 
     public static void main(String[] args) throws IOException {
        mServer = new c650MillerServer();
        mServer.configureServer();
+
+        // find the number of full packets and parse the file to be sent into individual packets
+
         int numOfFullPackets = (int) (mServer.mTestFile.length() / mServer.mBytesPerPacket);
         mServer.mListofPackets = new ArrayList<>();
         for (int i = 0; i < numOfFullPackets + 1; i++) {
             byte[] bytestoSend = mServer.readBytesFromFile(mServer.mBytesPerPacket * i);
             mServer.mListofPackets.add(bytestoSend);
         }
-       ServerSocket sockServ = new ServerSocket(21111);
-        // 2.2 listen on port 21111 for a client
-       while (true) {
 
+        // 2.2 listen on port 21111 for a client
+       ServerSocket sockServ = new ServerSocket(21111);
+
+       while (true) {
            try {
+
+               // Accept the client connection
                Socket socket = sockServ.accept();
+               DatagramSocket dSocket;
+               dSocket = new DatagramSocket();
+
+               // Handle the client in a different thread
                new Thread(new Runnable(){
                    @Override
                    public void run(){
                        int port;
                        try {
                            port = mServer.getPortFromClient(socket);
-                           mServer.sendData(mServer.mListofPackets, port, mServer.mTimeout);
+
+                           // Start the data timer
+                           new Thread(new Runnable() {
+                               @Override
+                               public void run() {
+                                   mServer.dataTimer(mServer.mListofPackets, port, mServer.mTimeout, dSocket);
+                               }
+                           }).start();
+
+                           // Try to send the data
+                           new Thread(new Runnable(){
+                               @Override
+                               public void run(){
+                                   mServer.sendData(mServer.mListofPackets, port, dSocket);
+                               }
+                           }).start();
+
                        } catch (IOException e) {
                            e.printStackTrace();
                        }
                    }
                }).start();
-
            } catch (IOException e) {
                e.printStackTrace();
            }
 
-           }
+       }
     }
 
     /**
@@ -80,14 +112,14 @@ public class c650MillerServer {
      * @throws IOException
      */
     private int getPortFromClient(Socket socket) throws IOException{
+        int port = -1;
         BufferedReader cin = new BufferedReader (new InputStreamReader(socket.getInputStream()));
         String message = cin.readLine();
         if(message.equals("hello")){
-            System.out.print("\n"+message + "\n");
+            port = Integer.parseInt(cin.readLine());
+            System.out.print("\n"+ port + " hello received");
         }
 
-        int port = Integer.parseInt(cin.readLine());
-        System.out.print(port);
         socket.close();
         return port;
     }
@@ -139,23 +171,24 @@ public class c650MillerServer {
      * @param data data to be sent
      * @param port
      */
-    private void sendData(ArrayList<byte[]> data, int port, int timeout){
-        try {
-
-            DatagramSocket dSocket;
-            dSocket = new DatagramSocket();
-            dSocket.setSoTimeout(timeout);
+    private void sendData(ArrayList<byte[]> data, int port, DatagramSocket dSocket){
 
             try {
                 InetAddress IP = InetAddress.getLocalHost();
                 for (int i = 0; i < data.size(); i++){
                     byte[] payloadData = data.get(i);
 
+                    // create a new output stream to write packet contents to
                     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                    outputStream.write(i);
+
                     try {
+                        // write the packet number (bytes 0-3)
+                        outputStream.write(intToBytes(i));
+                        // write the total file size (bytes 4-11)
                         outputStream.write(longToBytes(mFileSize));
+                        // write the payload size (bytes 12-15)
                         outputStream.write(intToBytes(payloadData.length));
+                        // write the payload (bytes 16-payload size)
                         outputStream.write(payloadData);
                     } catch (IOException e) {
                         e.printStackTrace();
@@ -166,45 +199,93 @@ public class c650MillerServer {
                     DatagramPacket packet = new DatagramPacket(payload, payload.length, IP, port);
 
                     try {
+                        // send the packet
                         dSocket.send(packet);
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
                 }
-
-                byte[] buff = new byte[300];
-                DatagramPacket packet = new DatagramPacket(buff, buff.length);
-
-            while(true){
-                try {
-                    dSocket.receive(packet);
-                    String message = new String(packet.getData(), 0, packet.getLength());
-                    if (message.equals("ok")){
-                        System.out.print("\n" + port + " OK");
-                        dSocket.close();
-                        break;
-                    }
-                } catch (SocketTimeoutException e){
-                    System.out.print("\n" + port + " resending...");
-
-                    new Thread(new Runnable(){
-                       @Override
-                       public void run(){
-                           sendData(mListofPackets, port, timeout *2);
-                       }
-                    }).start();
-                    break;
-                } catch (IOException e){
-                    e.printStackTrace();
-                }
-
-            }
-
             } catch (UnknownHostException e) {
                 e.printStackTrace();
             }
+    }
+
+    /**
+     * Set the data timer to an intial timeout value. If a timeout is reached before an ack is received,
+     * reset the timer to double the timeout value, then resend all contents of the file. If an ack is received before
+     * the timeout is reached, set an OK message timer and send an OK message to the client. If the OK timer times out
+     * close the connection with the client. If a duplicate ack is received before the OK timer expires, double OK timeout
+     * and resend the message.
+     * @param data the data of the file
+     * @param port the port to communicate with the client on
+     * @param timeout the timeout value to set the timer to in milliseconds
+     * @param dSocket the datagram socket used to communicate with the client
+     */
+    private void dataTimer(ArrayList<byte[]> data, int port, int timeout, DatagramSocket dSocket){
+        byte[] buff = new byte[100];
+        DatagramPacket packet = new DatagramPacket(buff, buff.length);
+        try {
+            // the socket timeout will function as our "data" timer
+            dSocket.setSoTimeout(timeout);
         } catch (SocketException e) {
             e.printStackTrace();
+        }
+        while(true){
+            try {
+                try {
+                    dSocket.receive(packet);
+                } catch (SocketException e) {
+                    break;
+                }
+                String message = new String(packet.getData(), 0, packet.getLength());
+
+                // we got an ack from a client!
+                if (message.equals("received")){
+                    String ok = "OK";
+                    System.out.print("\n" + port + " " + ok);
+                    // start the ok timer
+                    new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            okTimer(port, timeout, dSocket);
+                        }
+                    }).start();
+
+                    // send the ok message
+                    new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            sendOKmessage(port, dSocket);
+                        }
+                    }).start();
+                    break;
+                }
+            } catch (SocketTimeoutException e){
+
+                // The ack was not received before the data timer expired.
+                // Double the timeout value and send the data again
+
+                System.out.print("\n" + port + " resending...");
+
+                // set the "data" timer
+                new Thread(new Runnable(){
+                    @Override
+                    public void run(){
+                        dataTimer(data, port, timeout*2, dSocket);
+                    }
+                }).start();
+
+                // send the data
+                new Thread(new Runnable(){
+                    @Override
+                    public void run(){
+                        sendData(data, port, dSocket);
+                    }
+                }).start();
+                break;
+            } catch (IOException e){
+                e.printStackTrace();
+            }
         }
     }
 
@@ -237,5 +318,76 @@ public class c650MillerServer {
     }
 
 
+    /**
+     * Send the OK message to a client
+     * @param port to reach the client on
+     * @param socket to reach the client on
+     */
+    private void sendOKmessage(int port, DatagramSocket socket) {
+        try {
+            InetAddress IP = InetAddress.getLocalHost();
+            String ok = "OK";
+            DatagramPacket okPacket = new DatagramPacket(ok.getBytes(), ok.getBytes().length, IP, port);
+            try {
+                socket.send(okPacket);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Set the OK timer and send the OK message again if a duplicate ack is received
+     * @param port to reach the client on
+     * @param timeout to set the timer to in milliseconds
+     * @param socket to reach the client on
+     */
+    private void okTimer(int port, int timeout, DatagramSocket socket){
+
+        byte[] buff = new byte[100];
+        DatagramPacket packet = new DatagramPacket(buff, buff.length);
+
+        try {
+            // set the "OK" timer
+            socket.setSoTimeout(timeout);
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+
+        while(true){
+            try {
+                socket.receive(packet);
+                String message = new String(packet.getData(), 0, packet.getLength());
+                // duplicate ack received
+                if (message.equals("received")){
+                    System.out.print("\n" + port + " duplicate ack received");
+                    // set the "OK" timer to twice the previous timeout value
+                    new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            okTimer(port, timeout*2, socket);
+                        }
+                    }).start();
+                    // send the "OK message again"
+                    new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            sendOKmessage(port, socket);
+                        }
+                    }).start();
+                    break;
+                }
+            } catch (SocketTimeoutException e){
+                // no duplicate acks! Close the socket, we're done servicing this client
+                System.out.print("\n" + port + " done");
+                socket.close();
+                break;
+            } catch (IOException e){
+                e.printStackTrace();
+            }
+        }
+    }
 
 }
