@@ -1,5 +1,6 @@
 import java.io.*;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
 
@@ -12,7 +13,7 @@ public class c650MillerServer {
     // server class
     private static c650MillerServer mServer;
     // test file location per the spec sheet
-    private File mTestFile = new File("C:\\c650projs19\\stestfile");
+    private File mTestFile = new File("C:\\c650projs19\\stestfile.pdf");
     // test file size in bytes
     private long mFileSize = mTestFile.length();
     // all packets to be sent
@@ -295,12 +296,9 @@ public class c650MillerServer {
      * @return byte array
      */
     private byte[] longToBytes(long num) {
-        byte[] value = new byte[8];
-        for (int i = 7; i >= 0; i--) {
-            value[i] = (byte)(num & 0xFF);
-            num >>= 8;
-        }
-        return value;
+        ByteBuffer buffer = ByteBuffer.allocate(8);
+        buffer.putLong(num);
+        return buffer.array();
     }
 
     /**
@@ -309,12 +307,9 @@ public class c650MillerServer {
      * @return byte array
      */
     private byte[] intToBytes(int num) {
-        byte[] value = new byte[4];
-        for (int i = 3; i >= 0; i--) {
-            value[i] = (byte)(num & 0xFF);
-            num >>= 8;
-        }
-        return value;
+        ByteBuffer buffer = ByteBuffer.allocate(4);
+        buffer.putInt(num);
+        return buffer.array();
     }
 
 

@@ -1,6 +1,7 @@
 import java.io.*;
 import java.io.IOException;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.*;
 
 public class c650MillerClient {
@@ -69,7 +70,7 @@ public class c650MillerClient {
     private void receiveData(int port, DatagramSocket uSocket) throws IOException{
         System.out.print("Listening on " + port);
         // set buff size to make UDP packet size in bytes
-        byte[] buff = new byte[65535];
+        byte[] buff = new byte[1500];
         long fileSize;
         DatagramPacket packet = null;
         int ServerPort = 0;
@@ -124,8 +125,11 @@ public class c650MillerClient {
                     mOutOfOrderPackets.add(packet.getData());
                 }
 
+
                 //reset buffer
-                buff = new byte[65535];
+                buff = new byte[1500];
+
+
 
                 if(fileSize == mNumOfBytesReceived){
                     String ack = "received";
@@ -184,12 +188,10 @@ public class c650MillerClient {
      * @return long
      */
     private long bytesToLong(byte[] bytes) {
-        long value = 0;
-        for (int i = 0; i < 8; i++) {
-            value <<= 8;
-            value |= (bytes[i] & 0xFF);
-        }
-        return value;
+        ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+        buffer.put(bytes);
+        buffer.flip();
+        return buffer.getLong();
     }
 
     /**
@@ -198,12 +200,10 @@ public class c650MillerClient {
      * @return int
      */
     private int bytesToInt(byte[] bytes) {
-        int value = 0;
-        for (int i = 0; i < 4; i++) {
-            value <<= 8;
-            value |= (bytes[i] & 0xFF);
-        }
-        return value;
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES);
+        buffer.put(bytes);
+        buffer.flip();
+        return buffer.getInt();
     }
 
     /**
@@ -211,7 +211,7 @@ public class c650MillerClient {
      * @param bytes
      */
     private void writeToFile(LinkedHashSet<byte[]> bytes){
-        File file = new File("C:\\c650projs19\\ctestfile");
+        File file = new File("C:\\c650projs19\\ctestfile.pdf");
         try {
             OutputStream os = new FileOutputStream(file);
             for (byte[] chunk : bytes){
