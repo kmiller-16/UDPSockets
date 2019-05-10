@@ -122,14 +122,14 @@ public class c650MillerClient {
                 }
 
                 else{
-                    mOutOfOrderPackets.add(packet.getData());
+                    // only buffer the packet if we don't already have it in order
+                    if(packetNumber > mExpectedPacketNumber){
+                        mOutOfOrderPackets.add(packet.getData());
+                    }
                 }
-
 
                 //reset buffer
                 buff = new byte[1500];
-
-
 
                 if(fileSize == mNumOfBytesReceived){
                     String ack = "received";
@@ -163,7 +163,6 @@ public class c650MillerClient {
      */
     private void checkOutofOrderPackets(){
         boolean matchFound = false;
-
         for (byte[] Pkt : mOutOfOrderPackets){
             int packNum = bytesToInt(Arrays.copyOfRange(Pkt, 0, 4));
             if(packNum == mExpectedPacketNumber){
@@ -211,7 +210,7 @@ public class c650MillerClient {
      * @param bytes
      */
     private void writeToFile(LinkedHashSet<byte[]> bytes){
-        File file = new File("C:\\c650projs19\\ctestfile.pdf");
+        File file = new File("C:\\c650projs19\\ctestfile");
         try {
             OutputStream os = new FileOutputStream(file);
             for (byte[] chunk : bytes){

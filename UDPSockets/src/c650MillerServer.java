@@ -13,7 +13,7 @@ public class c650MillerServer {
     // server class
     private static c650MillerServer mServer;
     // test file location per the spec sheet
-    private File mTestFile = new File("C:\\c650projs19\\stestfile.pdf");
+    private File mTestFile = new File("C:\\c650projs19\\stestfile");
     // test file size in bytes
     private long mFileSize = mTestFile.length();
     // all packets to be sent
