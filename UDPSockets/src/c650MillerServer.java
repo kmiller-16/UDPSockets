@@ -17,7 +17,7 @@ public class c650MillerServer {
     // test file size in bytes
     private long mFileSize = mTestFile.length();
     // all packets to be sent
-    private ArrayList<byte[]> mListofPackets;
+    private ArrayList<byte[]> mData;
 
     public static void main(String[] args) throws IOException {
        mServer = new c650MillerServer();
@@ -26,10 +26,10 @@ public class c650MillerServer {
         // find the number of full packets and parse the file to be sent into individual packets
 
         int numOfFullPackets = (int) (mServer.mTestFile.length() / mServer.mBytesPerPacket);
-        mServer.mListofPackets = new ArrayList<>();
+        mServer.mData = new ArrayList<>();
         for (int i = 0; i < numOfFullPackets + 1; i++) {
             byte[] bytestoSend = mServer.readBytesFromFile(mServer.mBytesPerPacket * i);
-            mServer.mListofPackets.add(bytestoSend);
+            mServer.mData.add(bytestoSend);
         }
 
         // 2.2 listen on port 21111 for a client
@@ -55,7 +55,7 @@ public class c650MillerServer {
                            new Thread(new Runnable() {
                                @Override
                                public void run() {
-                                   mServer.dataTimer(mServer.mListofPackets, port, mServer.mTimeout, dSocket);
+                                   mServer.dataTimer(port, mServer.mTimeout, dSocket);
                                }
                            }).start();
 
@@ -63,7 +63,7 @@ public class c650MillerServer {
                            new Thread(new Runnable(){
                                @Override
                                public void run(){
-                                   mServer.sendData(mServer.mListofPackets, port, dSocket);
+                                   mServer.sendData(port, dSocket);
                                }
                            }).start();
 
@@ -169,15 +169,15 @@ public class c650MillerServer {
      * Send data to the client over UDP
      * 2.3 The server sends the bytes of the file
      * 2.4 packets are numbered and carry the file size
-     * @param data data to be sent
-     * @param port
+     * @param port port to send data to
+     * @param dSocket socket to send data on
      */
-    private void sendData(ArrayList<byte[]> data, int port, DatagramSocket dSocket){
+    private void sendData(int port, DatagramSocket dSocket){
 
             try {
                 InetAddress IP = InetAddress.getLocalHost();
-                for (int i = 0; i < data.size(); i++){
-                    byte[] payloadData = data.get(i);
+                for (int i = 0; i < mData.size(); i++){
+                    byte[] payloadData = mData.get(i);
 
                     // create a new output stream to write packet contents to
                     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -217,12 +217,11 @@ public class c650MillerServer {
      * the timeout is reached, set an OK message timer and send an OK message to the client. If the OK timer times out
      * close the connection with the client. If a duplicate ack is received before the OK timer expires, double OK timeout
      * and resend the message.
-     * @param data the data of the file
      * @param port the port to communicate with the client on
      * @param timeout the timeout value to set the timer to in milliseconds
      * @param dSocket the datagram socket used to communicate with the client
      */
-    private void dataTimer(ArrayList<byte[]> data, int port, int timeout, DatagramSocket dSocket){
+    private void dataTimer(int port, int timeout, DatagramSocket dSocket){
         byte[] buff = new byte[100];
         DatagramPacket packet = new DatagramPacket(buff, buff.length);
         try {
@@ -272,7 +271,7 @@ public class c650MillerServer {
                 new Thread(new Runnable(){
                     @Override
                     public void run(){
-                        dataTimer(data, port, timeout*2, dSocket);
+                        dataTimer(port, timeout*2, dSocket);
                     }
                 }).start();
 
@@ -280,7 +279,7 @@ public class c650MillerServer {
                 new Thread(new Runnable(){
                     @Override
                     public void run(){
-                        sendData(data, port, dSocket);
+                        sendData(port, dSocket);
                     }
                 }).start();
                 break;
